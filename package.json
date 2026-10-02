@@ -1,12 +1,12 @@
 {
-  "name": "hello-world-extension",
-  "version": "0.2.0",
-  "description": "A template Pi Coding Agent extension (pi 0.84.x / @earendil-works)",
+  "name": "pi-oneturnagent",
+  "version": "0.1.0",
+  "description": "One-turn model substitution for Pi Coding Agent: $ swaps the model for a single turn, $$ also trims the session to the agent's final output (pi 0.99.x / @earendil-works)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_USERNAME/hello-world-extension.git"
+    "url": "git+https://github.com/eleqtrizit/pi-oneturnagent.git"
   },
-  "author": "Your Name",
+  "author": "Agustin",
   "license": "MIT",
   "keywords": [
     "pi-package"
@@ -14,7 +14,6 @@
   "main": "extensions/index.ts",
   "files": [
     "extensions",
-    "skills",
     "src",
     "package.json",
     "README.md"
@@ -25,22 +24,18 @@
   },
   "dependencies": {},
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.0",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.99.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1",
     "@types/node": "^25.3.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "pi": {
-    "image": "https://raw.githubusercontent.com/YOUR_USERNAME/hello-world-extension/main/extension-icon.png",
     "extensions": [
       "extensions/index.ts"
-    ],
-    "skills": [
-      "skills"
     ]
   }
 }

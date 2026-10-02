@@ -1,64 +1,46 @@
-# pi Extension Template
+# pi-oneturnagent
 
-A starter repository for building extensions for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent). It ships a working extension (`extensions/index.ts`) with a custom tool, an event handler, and a slash command, plus the TypeScript and test setup already wired up.
+One-turn model substitution for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent).
 
-## Getting Started
+- **`$<model> <prompt>`** — switch the session to a fuzzy-matched substitute model, run exactly one turn with your prompt, then restore the original model. The original model is restored even on error or abort (restoration runs in a `finally` block).
+- **`$$<model> <prompt>`** — the same one-turn substitution, but afterwards the session is trimmed so **only the agent's final output stays in context**: tool calls, tool results, and intermediate assistant turns are dropped via `context_edit` entries emitted from the `turn_end` handler. Carry the answer forward without the noise.
+- Three or more dollars (`$$$...`) is ordinary text, as are dollar amounts like `$100 budget note` — anything that does not parse as a model command flows through untouched.
 
-Point your pi agent at this repo and ask:
+While typing, an autocomplete provider offers model completions after `$` and `$$` (the editor opens the popup on the `$` trigger character).
 
-> How do I get started?
+## Model resolution
 
-The agent reads `AGENTS.md` in this repo and will walk you through the setup: copying the template to a new directory, installing dependencies, and running the example extension.
+Bare model names resolve through a priority ladder (each group falls back to the next only when empty):
 
-## What's Included
+1. **Flavored models** — the `enabledModelsHigh` / `enabledModelsMed` / `enabledModelsFast` lists from pi's `settings.json`
+2. **Scoped models** — pi's `--models` flag patterns, or the `enabledModels` list when the flag is absent
+3. **The full registry** — every model pi has available
 
-```
-extensions/index.ts   Example extension: hello_world and echo tools, tool_call gate, /template command
-src/                  Source modules the extension imports
-tests/                Vitest tests (mirrors src/)
-package.json          pi-package metadata (main, pi.extensions)
-tsconfig.json         Strict TypeScript (ESNext, NodeNext); typecheck only, no build step
-```
+Provider-prefixed requests (`openai/gpt-5`) resolve strictly within the named provider and never fall back to another provider. Fuzzy matching supports composite tokens (`qwen35b` → `Qwen35Coder-35B`), partial names (`haiku`), Levenshtein distance, and provider priority (OAuth/subscription providers first).
 
-## Manual Steps (for reference)
+## Install
 
-1. Copy the template to a new directory (Linux/macOS, skipping `.git` and `node_modules`):
-
-   ```bash
-   rsync -vrt --delete --delete-excluded --exclude node_modules --exclude .git ./ /path/to/new-repo/
-   ```
-
-2. `npm install` (or initialize from scratch: `npm init -y`, then `npm install --save-dev typescript vitest @types/node @earendil-works/pi-coding-agent && npm install typebox`).
-3. Keep `tsconfig.json` as-is (ESNext, NodeNext, strict). No build step needed; pi loads TypeScript via jiti. Use `npx tsc --noEmit` for typechecking.
-4. Check `package.json`: `main` and `pi.extensions` point at the entry point (`extensions/index.ts`), `keywords: ["pi-package"]`, `typebox` in `dependencies`, `@earendil-works/pi-coding-agent` as a peer.
-5. Edit `extensions/index.ts` (or replace it). The default export is a factory receiving `ExtensionAPI`.
-6. Test:
-
-   ```bash
-   npm run typecheck
-   pi -e ./extensions/index.ts     # quick manual test
-   npm test                        # vitest
-   ```
-
-   For auto-discovery and `/reload`, place extensions in `~/.pi/agent/extensions/` or project `.pi/extensions/`.
-7. Publish: update the version, then `npm publish`. Users install with `pi install npm:<name>`. Runtime deps must go in `dependencies` (pi installs with `--omit=dev`).
-
-Package names: `@earendil-works/pi-coding-agent` and `typebox` are current; `@mariozechner/pi-coding-agent` and `@sinclair/typebox` are obsolete.
-
-## Key APIs
-
-```ts
-pi.registerTool()      // custom tools the LLM can call
-pi.on(event, handler)  // session_start, session_shutdown, before_agent_start,
-                       // tool_call, tool_result, turn_start/turn_end, ...
-pi.registerCommand("name", {...})
+```bash
+npm install
 ```
 
-Every handler receives an `ExtensionContext` with `ctx.ui` (notify, setStatus, setWidget, select, confirm, input, editor), `ctx.sessionManager`, `ctx.cwd`, `ctx.mode`, and more.
+Requires pi ≥ 0.99.1 (`@earendil-works/pi-coding-agent` peer). The `$$` trim relies on the `turn_end` boundary-draft API introduced after 0.84.
 
-## Documentation
+## Test
 
-After `npm install`, docs and examples ship inside the pi package:
+```bash
+npm run typecheck   # tsc --noEmit
+npm test            # vitest
+```
 
-- Docs: `node_modules/@earendil-works/pi-coding-agent/docs/` (start with `extensions.md` and `writing-an-extension.md`)
-- Examples: `node_modules/@earendil-works/pi-coding-agent/examples/extensions/`
+## How the `$$` trim works
+
+A pi extension command handler cannot mutate session history (`ctx.sessionManager` is a `ReadonlySessionManager`). Trimming therefore runs through the supported boundary-event path: `runSubCommand` arms a `trimNextTurnToLastMessage` flag before the substitute turn's prompt is sent, and a `turn_end` handler returns `context_edit` draft entries (`replacement: null`) that omit each intermediate tool-calling turn's assistant message and tool results from model context. A turn with no tool results is the final answer: it is kept and the flag disarms. See `buildTrimToLastTurnDrafts` in `extensions/index.ts`.
+
+## Files
+
+```
+extensions/index.ts   The extension: parsing, one-turn execution, trim, autocomplete, entry renderer
+extensions/index.test.ts
+src/utils/flavoredModels.ts   Flavor-categorized model-list I/O for the resolution ladder
+```
