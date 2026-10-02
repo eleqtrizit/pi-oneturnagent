@@ -1,6 +1,6 @@
 # pi-oneturnagent
 
-One-turn model substitution for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent).
+**One-turn model substitution for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent).**
 
 - **`$<model> <prompt>`** — switch the session to a fuzzy-matched substitute model, run exactly one turn with your prompt, then restore the original model. The original model is restored even on error or abort (restoration runs in a `finally` block).
 - **`$$<model> <prompt>`** — the same one-turn substitution, but afterwards the session is trimmed so **only the agent's final output stays in context**: tool calls, tool results, and intermediate assistant turns are dropped via `context_edit` entries emitted from the `turn_end` handler. Carry the answer forward without the noise.
@@ -8,23 +8,54 @@ One-turn model substitution for the [pi coding agent](https://github.com/earendi
 
 While typing, an autocomplete provider offers model completions after `$` and `$$` (the editor opens the popup on the `$` trigger character).
 
-## Model resolution
-
-Bare model names resolve through a priority ladder (each group falls back to the next only when empty):
-
-1. **Flavored models** — the `enabledModelsHigh` / `enabledModelsMed` / `enabledModelsFast` lists from pi's `settings.json`
-2. **Scoped models** — pi's `--models` flag patterns, or the `enabledModels` list when the flag is absent
-3. **The full registry** — every model pi has available
-
-Provider-prefixed requests (`openai/gpt-5`) resolve strictly within the named provider and never fall back to another provider. Fuzzy matching supports composite tokens (`qwen35b` → `Qwen35Coder-35B`), partial names (`haiku`), Levenshtein distance, and provider priority (OAuth/subscription providers first).
-
-## Install
+## Quickstart
 
 ```bash
-npm install
+pi install https://github.com/eleqtrizit/pi-oneturnagent
 ```
 
 Requires pi ≥ 0.99.1 (`@earendil-works/pi-coding-agent` peer). The `$$` trim relies on the `turn_end` boundary-draft API introduced after 0.84.
+
+## Quick Start
+
+Use simple phrasing in the chat window to run one turn with a different model:
+
+```
+$opus write a haiku about queues
+```
+
+```
+$claude-3.5 review the auth module and list any security concerns
+```
+
+```
+$openai/gpt-5 refactor the parsing code in src/utils/paths.ts
+```
+
+Use `$$` when you want only the final answer kept in context (tool calls trimmed):
+
+```
+$$qwen3-coder find all TODOs in the repo and propose fixes
+```
+
+```
+$$gpt-5 audit the schema and report breaking changes
+```
+
+Bare model names resolve automatically — `haiku`, `qwen35b`, `claude-3.5` all match through the same fuzzy matching as `resolve_model`, with autocomplete while typing.
+
+## Model Resolution
+
+Bare model names walk a priority ladder (each group falls back to the next only when empty):
+
+- **Flavored models** - the `enabledModelsHigh` / `enabledModelsMed` / `enabledModelsFast` lists from pi's settings.json
+- **Scoped models** - pi's `--models` flag patterns, or the `enabledModels` list when the flag is absent
+- **The full registry** - every model pi has available
+
+- Provider-prefixed requests (`openai/gpt-5`) resolve strictly within the named provider and never fall back to another provider
+- Smart fuzzy matching with Levenshtein distance and composite tokens (`qwen35b` → `Qwen35Coder-35B`)
+- Provider priority (OAuth/subscription first, then API-key providers)
+- Supports partial names like "haiku", "qwen3-coder", "claude-3.5"
 
 ## Test
 
