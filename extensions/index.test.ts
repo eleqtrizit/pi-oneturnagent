@@ -150,6 +150,36 @@ describe("resolveModelWithProvider", () => {
     );
     expect(resolved).toBe("bighank/qwen3coder-35b");
   });
+
+  it("exact-matches a model id that contains slashes", () => {
+    const modelRegistry = {
+      getAvailable: () => [
+        { provider: "inference", id: "aws/anthropic/bedrock-claude-sonnet-5-5" },
+        { provider: "spark", id: "spark/model" },
+      ],
+    };
+    const resolved = resolveModelWithProvider(
+      "inference/aws/anthropic/bedrock-claude-sonnet-5-5",
+      modelRegistry,
+      { flavoredModelIds: [], scopedPatterns: [] },
+    );
+    expect(resolved).toBe("inference/aws/anthropic/bedrock-claude-sonnet-5-5");
+  });
+
+  it("returns null when a multi-slash model id is missing from the named provider", () => {
+    const modelRegistry = {
+      getAvailable: () => [
+        { provider: "inference", id: "aws/anthropic/bedrock-claude-sonnet-5-5" },
+        { provider: "spark", id: "spark/model" },
+      ],
+    };
+    const resolved = resolveModelWithProvider(
+      "inference/aws/anthropic/bedrock-claude-sonnet-5-6",
+      modelRegistry,
+      { flavoredModelIds: [], scopedPatterns: [] },
+    );
+    expect(resolved).toBeNull();
+  });
 });
 
 describe("resolveModelWithProvider resolution ladder", () => {

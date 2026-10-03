@@ -304,11 +304,14 @@ export function completeModelArg(
   // whitespace means the user has moved on to typing the prompt.
   if (argumentPrefix.trim().includes(" ")) return null;
   const modelToken = argumentPrefix.split(" ", 1)[0];
-  const tokenParts = modelToken.split("/", 2);
+  // Model ids can contain slashes; split at the first slash only so the full
+  // remainder is treated as the model-id prefix (split("/", 2) would truncate
+  // the array and drop every slash after the second).
+  const slashIndex = modelToken.indexOf("/");
   const providerPrefix =
-    tokenParts.length === 2 ? tokenParts[0].toLowerCase() : null;
+    slashIndex !== -1 ? modelToken.slice(0, slashIndex).toLowerCase() : null;
   const namePrefix = (
-    tokenParts.length === 2 ? tokenParts[1] : modelToken
+    slashIndex !== -1 ? modelToken.slice(slashIndex + 1) : modelToken
   ).toLowerCase();
   const items = models
     .filter(
@@ -501,12 +504,15 @@ export function resolveModelWithProvider(
   // Never fall back to a different provider — that causes false positives like
   // resolve_model("vyper/Qwen-35B") returning bighank/Qwen-35B.
   if (modelName.includes("/")) {
-    const [providerPart, modelPart] = modelName.split("/", 2);
-    const provider = providerPart.toLowerCase();
-    const modelId = modelPart.toLowerCase();
+    // Split at the first slash only: model ids can themselves contain slashes
+    // (e.g. "aws/anthropic/bedrock-claude-sonnet-5-5"). split("/", 2) would
+    // truncate the result array instead of limiting splits and drop the tail.
+    const slashIndex = modelName.indexOf("/");
+    const providerPart = modelName.slice(0, slashIndex);
+    const modelId = modelName.slice(slashIndex + 1).toLowerCase();
     const exists = availableModels.some(
       (m) =>
-        m.provider.toLowerCase() === provider &&
+        m.provider.toLowerCase() === providerPart.toLowerCase() &&
         m.model.toLowerCase() === modelId,
     );
     if (exists) {
@@ -514,14 +520,14 @@ export function resolveModelWithProvider(
     }
     // Try resolving model-id scoped to the named provider only.
     const providerModels = availableModels.filter(
-      (m) => m.provider.toLowerCase() === provider,
+      (m) => m.provider.toLowerCase() === providerPart.toLowerCase(),
     );
     if (providerModels.length > 0) {
       const scopedRegistry: ModelRegistryLike = {
         getAvailable: () =>
           providerModels.map((m) => ({ provider: m.provider, id: m.model })),
       };
-      const scopedResult = resolveModelWithProvider(modelPart, scopedRegistry);
+      const scopedResult = resolveModelWithProvider(modelId, scopedRegistry);
       if (scopedResult) {
         return scopedResult;
       }

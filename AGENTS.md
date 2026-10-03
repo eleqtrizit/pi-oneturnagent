@@ -10,7 +10,7 @@ One-turn model substitution extension for pi coding agent (pi ≥ 0.99.1, @earen
 
 ## Model resolution
 
-`resolveModelWithProvider` walks a ladder: flavored models (pi settings high/med/fast) → scoped models (`--models` argv patterns or `enabledModels`) → full registry. Provider-prefixed requests resolve strictly within the named provider. Fuzzy matching: exact → partial tokens → composite-aware scoring (`tokenMatchStrength`) → Levenshtein (`getTopModelsFromList`). Provider priority favors OAuth/subscription providers. Group overrides (`scope` param) act as testing hooks.
+`resolveModelWithProvider` walks a ladder: flavored models (pi settings high/med/fast) → scoped models (`--models` argv patterns or `enabledModels`) → full registry. Provider-prefixed requests resolve strictly within the named provider. Multi-slash model ids (for example `inference/aws/anthropic/bedrock-claude-sonnet-5-5`) are supported: the provider is the component before the first slash and the model id is the full remainder, sliced with `indexOf` (never `split("/", 2)`, which truncates the result array). Fuzzy matching: exact → partial tokens → composite-aware scoring (`tokenMatchStrength`) → Levenshtein (`getTopModelsFromList`). Provider priority favors OAuth/subscription providers. Group overrides (`scope` param) act as testing hooks.
 
 The model list for completions comes from the in-process registry with a 60-second cache (`clearModelsCache` resets it; tests must call it in `beforeEach`).
 
