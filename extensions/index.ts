@@ -193,6 +193,58 @@ export async function executeSubTurn(
 export interface TurnEndTrimEvent {
   messageEntryId: string;
   toolResultEntryIds: string[];
+  /**
+   * How the turn ended: "completed" means the run may continue (final answer
+   * or intermediate step); "aborted" or "error" means the run is over or the
+   * turn failed (pi may retry an errored turn inside the same run). pi omits
+   * the field on older builds, treated as "completed".
+   */
+  outcome?: "completed" | "aborted" | "error";
+}
+
+/**
+ * Build the trim drafts for the buffered turns of one finished run.
+ *
+ * A turn with tool results is trimmed entirely (assistant message plus tool
+ * results). A turn that ended aborted or with no tool results is a dangling
+ * partial step: its assistant message is trimmed so the run leaves no
+ * half-written text behind. A completed turn with no tool results is the
+ * final answer: kept. Entries in `protectedEntryIds` are never targets: they
+ * existed before the run started, so erasing them would drop context that
+ * predates the run (a protected anchored turn contributes nothing).
+ *
+ * @param turns - The buffered turn_end events of the run, in order
+ * @param protectedEntryIds - Entry ids present before the run started; omit or pass null to disable the guard
+ * @returns Context-edit drafts omitting the run's intermediate content
+ */
+export function buildRunTrimDrafts(
+  turns: TurnEndTrimEvent[],
+  protectedEntryIds?: ReadonlySet<string> | null,
+): Array<{
+  type: "context_edit";
+  targetId: string;
+  replacement: null;
+}> {
+  const isProtected = (id: string) => protectedEntryIds?.has(id) ?? false;
+  return turns.flatMap((turn) => {
+    if (isProtected(turn.messageEntryId)) {
+      return [];
+    }
+    if (turn.toolResultEntryIds.length > 0) {
+      return buildTrimToLastTurnDrafts(turn, protectedEntryIds) ?? [];
+    }
+    if (turn.outcome === "completed" || turn.outcome === undefined) {
+      // Final answer: keep it.
+      return [];
+    }
+    return [
+      {
+        type: "context_edit" as const,
+        targetId: turn.messageEntryId,
+        replacement: null,
+      },
+    ];
+  });
 }
 
 /**
@@ -200,17 +252,26 @@ export interface TurnEndTrimEvent {
  * context, or null when the turn is the final answer (no tool results) and
  * should be kept.
  *
+ * Entries listed in `protectedEntryIds` are never draft targets: they existed
+ * before the trim-armed run started, so erasing them would drop context that
+ * predates the run. A protected assistant entry voids the entire draft (a
+ * turn anchored to a pre-existing entry cannot belong to the run); protected
+ * tool results are filtered out individually.
+ *
  * @param event - The turn_end event's entry-id fields
+ * @param protectedEntryIds - Entry ids present before the run started; omit or pass null to disable the guard
  * @returns Context-edit drafts omitting the turn's messages, or null to keep the turn
  */
 export function buildTrimToLastTurnDrafts(
   event: TurnEndTrimEvent,
+  protectedEntryIds?: ReadonlySet<string> | null,
 ): Array<{
   type: "context_edit";
   targetId: string;
   replacement: null;
 }> | null {
-  if (event.toolResultEntryIds.length === 0) {
+  const isProtected = (id: string) => protectedEntryIds?.has(id) ?? false;
+  if (event.toolResultEntryIds.length === 0 || isProtected(event.messageEntryId)) {
     return null;
   }
   return [
@@ -219,11 +280,13 @@ export function buildTrimToLastTurnDrafts(
       targetId: event.messageEntryId,
       replacement: null,
     },
-    ...event.toolResultEntryIds.map((targetId) => ({
-      type: "context_edit" as const,
-      targetId,
-      replacement: null,
-    })),
+    ...event.toolResultEntryIds
+      .filter((targetId) => !isProtected(targetId))
+      .map((targetId) => ({
+        type: "context_edit" as const,
+        targetId,
+        replacement: null,
+      })),
   ];
 }
 
@@ -1067,26 +1130,75 @@ export default function (pi: ExtensionAPI) {
     if (waiter) {
       subRunEndWaiter = null;
       waiter();
+      // The substitute run is over. If the trim flag is still armed here, the
+      // run ended without a final-answer turn_end (abort, error, retry while
+      // trailing tool calls) and the intermediate turns were already trimmed.
+      // Disarm now and discard any drafts accumulated so far: the run
+      // aborted or errored before settlement, so nothing is trimmed and
+      // trimming can never reach turns of a later run or any context that
+      // existed before the substitute turn started.
+      trimNextTurnToLastMessage = false;
+      trimProtectedEntryIds = null;
+      pendingTrimTurns = [];
     }
   });
 
   // For the $$ (double-dollar) command: when this is set, the currently
-  // running substitute turn should be trimmed so that only its final assistant
-  // output stays in session context. The turn_end handler drops the tool-call
-  // assistant messages and tool results, then disarms on the final answer.
+  // running substitute turn should be trimmed after it finishes so that only
+  // its final assistant output stays in session context. The turn_end handler
+  // accumulates drafts for each finished tool-calling turn WITHOUT applying
+  // them (the substitute model must see its own tool results while it works);
+  // the agent_before_settle handler applies the accumulated drafts in one
+  // shot once the run is fully done. A run that never settles (abort) keeps
+  // its history: agent_end discards the drafts instead.
   let trimNextTurnToLastMessage = false;
+  // Entry ids captured when the flag was armed: everything present before the
+  // substitute prompt was sent. Drafts never target these ids, so turns that
+  // predate the run are structurally untrimmable.
+  let trimProtectedEntryIds: ReadonlySet<string> | null = null;
+  // Draft-source records collected for turns of the armed run, applied at
+  // settle. Kept as raw turn records so retried errors stay armed until the
+  // run truly settles, and so dangling errored turns can be trimmed there.
+  let pendingTrimTurns: TurnEndTrimEvent[] = [];
   pi.on("turn_end", (event) => {
     if (!trimNextTurnToLastMessage) {
       return;
     }
-    // Intermediate tool-calling turns get dropped; a turn with no tool
-    // results is the final answer: keep it and disarm.
-    const drafts = buildTrimToLastTurnDrafts(event);
-    if (!drafts) {
+    // pi fires the turn_end boundary even for the interrupted turn itself,
+    // as the run's final boundary. Flush everything then.
+    const isAborted = event.outcome === "aborted";
+    const anchoredToPreRunEntry =
+      trimProtectedEntryIds?.has(event.messageEntryId) ?? false;
+    if (!anchoredToPreRunEntry) {
+      pendingTrimTurns.push({
+        messageEntryId: event.messageEntryId,
+        toolResultEntryIds: event.toolResultEntryIds,
+        outcome: event.outcome ?? "completed",
+      });
+    }
+    if (isAborted) {
+      const entries = buildRunTrimDrafts(
+        pendingTrimTurns,
+        trimProtectedEntryIds,
+      );
+      pendingTrimTurns = [];
       trimNextTurnToLastMessage = false;
+      trimProtectedEntryIds = null;
+      return entries.length > 0 ? { entries } : undefined;
+    }
+    // No return value: drafts are withheld until the run settles. An errored
+    // turn stays buffered because pi may retry it within the same run; the
+    // settle boundary fires only after retries conclude.
+  });
+  pi.on("agent_before_settle", () => {
+    if (!trimNextTurnToLastMessage || pendingTrimTurns.length === 0) {
       return;
     }
-    return { entries: drafts };
+    const entries = buildRunTrimDrafts(pendingTrimTurns, trimProtectedEntryIds);
+    pendingTrimTurns = [];
+    trimNextTurnToLastMessage = false;
+    trimProtectedEntryIds = null;
+    return entries.length > 0 ? { entries } : undefined;
   });
 
 
@@ -1195,8 +1307,13 @@ export default function (pi: ExtensionAPI) {
     });
     // For $$ (trimToLastTurn), arm the turn-end trim so only the agent's
     // final output stays in context; tool calls and results are dropped.
+    // Also snapshot every entry id that exists right now: the trim drafts
+    // must never target entries that predate this run.
     if (trimToLastTurn) {
       trimNextTurnToLastMessage = true;
+      trimProtectedEntryIds = new Set(
+        ctx.sessionManager.getEntries().map((entry) => entry.id),
+      );
     }
     await executeSubTurn(
       {
