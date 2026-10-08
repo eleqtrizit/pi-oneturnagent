@@ -535,8 +535,8 @@ function byProviderPriority(
  *
  * Provider-prefixed requests resolve strictly within the named provider. Bare
  * names walk a priority ladder: the flavored models from pi settings first
- * (high/med/fast), then the session's scoped models (pi --models flag, or the
- * enabledModels list when the flag is absent), then the entire registry. The
+ * (orchestrator/worker/swarm, or the legacy high/med/fast), then the
+ * session's scoped models (pi --models flag, or the enabledModels list when the flag is absent), then the entire registry. The
  * fuzzy match runs only against the first non-empty group, so a configured
  * group always wins: a flavored model is returned when any flavored model is
  * set, and a scoped model is returned when any scoped model is set.
@@ -654,7 +654,7 @@ export function resolveModelWithProvider(
 /**
  * Map flavored model ids to registry-available models.
  *
- * Flavored ids are pi settings' high/med/fast entries; each id matches either
+ * Flavored ids are pi settings' orchestrator/worker/swarm (or legacy high/med/fast) entries; each id matches either
  * the "provider/modelId" pair or the bare model id, case-insensitively.
  *
  * @param availableModels - Registry-available models
@@ -765,7 +765,7 @@ export function buildScopedModelGroup(
 }
 
 /**
- * Build the flavored-model group: the high/med/fast flavor lists from pi
+ * Build the flavored-model group: the flavor lists (current and legacy keys) from pi
  * settings.json mapped to registry-available models.
  *
  * @param availableModels - Registry-available models
@@ -775,12 +775,10 @@ function getFlavoredModelGroup(
   availableModels: Array<{ provider: string; model: string }>,
 ): Array<{ provider: string; model: string }> {
   try {
-    const flavors = flavoredModels.readFlavoredModels();
-    return buildFlavoredModelGroup(availableModels, [
-      ...flavors.high,
-      ...flavors.med,
-      ...flavors.fast,
-    ]);
+    return buildFlavoredModelGroup(
+      availableModels,
+      flavoredModels.readFlavoredModelIds(),
+    );
   } catch (_e) {
     // Malformed settings leave the group empty and the ladder falls through.
     return [];

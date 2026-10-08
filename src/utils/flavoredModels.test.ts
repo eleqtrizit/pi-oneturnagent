@@ -1,14 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  buildFooterSummary,
-  buildModelFlavors,
-  readEnabledModels,
-  readFlavoredModels,
-  writeFlavorsToSettings,
-} from "./flavoredModels";
+import { readEnabledModels, readFlavoredModelIds } from "./flavoredModels";
 
 let settingsDir: string;
 let settingsPath: string;
@@ -23,37 +17,51 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (settingsDir) {
-    rmSync(settingsDir, { recursive: true, force: true });
-  }
+  rmSync(settingsDir, { recursive: true, force: true });
 });
 
-describe("readFlavoredModels", () => {
-  it("returns empty lists when flavor keys are missing", () => {
-    writeSettingsFile({ enabledModels: ["a", "b"] });
-    expect(readFlavoredModels(settingsPath)).toEqual({
-      high: [],
-      med: [],
-      fast: [],
-    });
+describe("readFlavoredModelIds", () => {
+  it("returns an empty list when no flavor keys exist", () => {
+    writeSettingsFile({ enabledModels: ["a"] });
+    expect(readFlavoredModelIds(settingsPath)).toEqual([]);
   });
 
-  it("reads all three flavor lists", () => {
+  it("reads the current orchestrator/worker/swarm keys", () => {
+    writeSettingsFile({
+      enabledModelsOrchestrator: ["o1"],
+      enabledModelsWorker: ["w1", "w2"],
+      enabledModelsSwarm: ["s1"],
+    });
+    expect(readFlavoredModelIds(settingsPath)).toEqual([
+      "o1",
+      "w1",
+      "w2",
+      "s1",
+    ]);
+  });
+
+  it("reads the legacy high/med/fast keys", () => {
     writeSettingsFile({
       enabledModelsHigh: ["h1"],
-      enabledModelsMed: ["m1", "m2"],
+      enabledModelsMed: ["m1"],
       enabledModelsFast: ["f1"],
     });
-    expect(readFlavoredModels(settingsPath)).toEqual({
-      high: ["h1"],
-      med: ["m1", "m2"],
-      fast: ["f1"],
+    expect(readFlavoredModelIds(settingsPath)).toEqual(["h1", "m1", "f1"]);
+  });
+
+  it("merges current and legacy keys without duplicates", () => {
+    writeSettingsFile({
+      enabledModelsWorker: ["x", "y"],
+      enabledModelsFast: ["y", "z"],
     });
+    expect(readFlavoredModelIds(settingsPath)).toEqual(["x", "y", "z"]);
   });
 
   it("throws on non-string entries", () => {
     writeSettingsFile({ enabledModelsHigh: ["ok", 42] });
-    expect(() => readFlavoredModels(settingsPath)).toThrow(/Non-string value/);
+    expect(() => readFlavoredModelIds(settingsPath)).toThrow(
+      /Non-string value/,
+    );
   });
 });
 
@@ -72,64 +80,5 @@ describe("readEnabledModels", () => {
     expect(() => readEnabledModels(settingsPath)).toThrow(
       /enabledModels is not an array/,
     );
-  });
-});
-
-describe("buildModelFlavors", () => {
-  it("assigns none to models not in any flavor list", () => {
-    const flavors = { high: ["a"], med: ["b"], fast: [] };
-    expect(buildModelFlavors(["a", "b", "c"], flavors)).toEqual([
-      { id: "a", flavor: "high" },
-      { id: "b", flavor: "med" },
-      { id: "c", flavor: "none" },
-    ]);
-  });
-
-  it("lets later lists win on duplicates (fast > med > high)", () => {
-    const flavors = { high: ["x"], med: ["x"], fast: ["x"] };
-    expect(buildModelFlavors(["x"], flavors)).toEqual([
-      { id: "x", flavor: "fast" },
-    ]);
-  });
-});
-
-describe("buildFooterSummary", () => {
-  it("counts each flavor bucket", () => {
-    const items = [
-      { id: "a", flavor: "high" as const },
-      { id: "b", flavor: "med" as const },
-      { id: "c", flavor: "none" as const },
-      { id: "d", flavor: "none" as const },
-    ];
-    expect(buildFooterSummary(items)).toBe("high:1 med:1 fast:0 none:2");
-  });
-});
-
-describe("writeFlavorsToSettings round-trip", () => {
-  it("writes flavor lists and preserves unrelated keys", () => {
-    writeSettingsFile({
-      enabledModels: ["a", "b", "c"],
-      unrelated: { keep: true },
-    });
-
-    const assigned = buildModelFlavors(
-      ["a", "b", "c"],
-      readFlavoredModels(settingsPath),
-    );
-    assigned[0].flavor = "high";
-    assigned[1].flavor = "fast";
-    // assigned[2] stays "none"
-
-    writeFlavorsToSettings(assigned, settingsPath);
-
-    const result = readFlavoredModels(settingsPath);
-    expect(result.high).toEqual(["a"]);
-    expect(result.fast).toEqual(["b"]);
-    expect(result.med).toEqual([]);
-
-    // Unrelated keys survive the read-modify-write
-    const raw = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    expect(raw.unrelated).toEqual({ keep: true });
-    expect(raw.enabledModels).toEqual(["a", "b", "c"]);
   });
 });

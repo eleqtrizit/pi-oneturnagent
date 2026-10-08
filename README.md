@@ -48,7 +48,7 @@ Bare model names resolve automatically — `haiku`, `qwen35b`, `claude-3.5` all 
 
 Bare model names walk a priority ladder (each group falls back to the next only when empty):
 
-- **Flavored models** - the `enabledModelsHigh` / `enabledModelsMed` / `enabledModelsFast` lists from pi's settings.json
+- **Flavored models** - the `enabledModelsOrchestrator` / `enabledModelsWorker` / `enabledModelsSwarm` lists from pi's settings.json. The legacy `enabledModelsHigh` / `enabledModelsMed` / `enabledModelsFast` keys are read too. This extension never writes or migrates settings.
 - **Scoped models** - pi's `--models` flag patterns, or the `enabledModels` list when the flag is absent
 - **The full registry** - every model pi has available
 
@@ -73,5 +73,5 @@ A pi extension command handler cannot mutate session history (`ctx.sessionManage
 ```
 extensions/index.ts   The extension: parsing, one-turn execution, trim, autocomplete, entry renderer
 extensions/index.test.ts
-src/utils/flavoredModels.ts   Flavor-categorized model-list I/O for the resolution ladder
+src/utils/flavoredModels.ts   Read-only settings reader for the resolution ladder (current and legacy flavor keys)
 ```
